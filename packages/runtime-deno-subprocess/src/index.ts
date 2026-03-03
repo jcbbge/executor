@@ -130,9 +130,34 @@ const defaultDenoExecutable = (): string => {
   return "deno";
 };
 
-const workerScriptPath = fileURLToPath(
-  new URL("./deno-subprocess-worker.mjs", import.meta.url).toString(),
-);
+const resolveWorkerScriptPath = (): string => {
+  const moduleUrl = String(import.meta.url);
+
+  if (moduleUrl.startsWith("/")) {
+    return moduleUrl;
+  }
+
+  try {
+    const workerUrl = new URL("./deno-subprocess-worker.mjs", moduleUrl);
+    if (workerUrl.protocol === "file:") {
+      return fileURLToPath(workerUrl);
+    }
+
+    return workerUrl.pathname.length > 0 ? workerUrl.pathname : workerUrl.toString();
+  } catch {
+    return moduleUrl;
+  }
+};
+
+let cachedWorkerScriptPath: string | undefined;
+
+const workerScriptPath = (): string => {
+  if (!cachedWorkerScriptPath) {
+    cachedWorkerScriptPath = resolveWorkerScriptPath();
+  }
+
+  return cachedWorkerScriptPath;
+};
 
 const writeMessage = (
   stdin: NodeJS.WritableStream,
@@ -342,7 +367,7 @@ export const executeJavaScriptInDenoSubprocess = (
             worker = spawnDenoWorkerProcess(
               {
                 executable: denoExecutable,
-                scriptPath: workerScriptPath,
+                scriptPath: workerScriptPath(),
               },
               {
                 onStdoutLine: handleStdoutLine,

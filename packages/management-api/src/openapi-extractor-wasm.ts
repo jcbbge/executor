@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import initWasmExtractor, {
@@ -12,23 +12,28 @@ const readWasmBytes = async (): Promise<Uint8Array> => {
   const candidates: string[] = [];
 
   try {
-    const wasmModuleUrl = new URL(
-      "./openapi-extractor-wasm/openapi_extractor_bg.wasm",
-      import.meta.url,
-    ).toString();
+    const modulePath = fileURLToPath(String(import.meta.url));
 
     candidates.push(
-      fileURLToPath(wasmModuleUrl),
+      join(dirname(modulePath), "openapi-extractor-wasm/openapi_extractor_bg.wasm"),
     );
   } catch {
-    // Next.js serverless bundling can provide non-URL import.meta.url values.
+    // Fall through to cwd-based candidates.
   }
 
   candidates.push(
     join(process.cwd(), "packages/management-api/src/openapi-extractor-wasm/openapi_extractor_bg.wasm"),
     join(
       process.cwd(),
+      "../../packages/management-api/src/openapi-extractor-wasm/openapi_extractor_bg.wasm",
+    ),
+    join(
+      process.cwd(),
       "node_modules/@executor-v2/management-api/src/openapi-extractor-wasm/openapi_extractor_bg.wasm",
+    ),
+    join(
+      process.cwd(),
+      "../../node_modules/@executor-v2/management-api/src/openapi-extractor-wasm/openapi_extractor_bg.wasm",
     ),
   );
 
