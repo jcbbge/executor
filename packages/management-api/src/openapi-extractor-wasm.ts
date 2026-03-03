@@ -12,8 +12,13 @@ const readWasmBytes = async (): Promise<Uint8Array> => {
   const candidates: string[] = [];
 
   try {
+    const wasmModuleUrl = new URL(
+      "./openapi-extractor-wasm/openapi_extractor_bg.wasm",
+      import.meta.url,
+    ).toString();
+
     candidates.push(
-      fileURLToPath(new URL("./openapi-extractor-wasm/openapi_extractor_bg.wasm", import.meta.url)),
+      fileURLToPath(wasmModuleUrl),
     );
   } catch {
     // Next.js serverless bundling can provide non-URL import.meta.url values.

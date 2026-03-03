@@ -9,6 +9,18 @@ import {
   makeSourceManagerService,
 } from "@executor-v2/management-api";
 import {
+  createRunExecutor,
+  createSourceToolRegistry,
+  defaultExecuteToolExposureMode,
+  makeGraphqlToolProvider,
+  makeMcpToolProvider,
+  makeOpenApiToolProvider,
+  makeRuntimeAdapterRegistry,
+  makeToolProviderRegistry,
+  parseExecuteToolExposureMode,
+  type ExecuteToolExposureMode,
+} from "@executor-v2/engine";
+import {
   makeSqlControlPlanePersistence,
   type SqlControlPlanePersistence,
 } from "@executor-v2/persistence-sql";
@@ -22,14 +34,22 @@ import {
   type OrganizationMembership,
   type Workspace,
 } from "@executor-v2/schema";
+import { makeCloudflareWorkerLoaderRuntimeAdapter } from "@executor-v2/runtime-cloudflare-worker-loader";
+import { makeDenoSubprocessRuntimeAdapter } from "@executor-v2/runtime-deno-subprocess";
+import { makeLocalInProcessRuntimeAdapter } from "@executor-v2/runtime-local-inproc";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import { PmActorLive } from "../../../pm/src/actor";
-import { createPmApprovalsService } from "../../../pm/src/approvals-service";
+import {
+  createPmApprovalsService,
+  createPmPersistentToolApprovalPolicy,
+} from "../../../pm/src/approvals-service";
 import { createPmCredentialsService } from "../../../pm/src/credentials-service";
+import { createPmMcpHandler } from "../../../pm/src/mcp-handler";
 import { createPmOrganizationsService } from "../../../pm/src/organizations-service";
 import { createPmPoliciesService } from "../../../pm/src/policies-service";
+import { createPmExecuteRuntimeRun } from "../../../pm/src/runtime-execution-port";
 import { createPmStorageService } from "../../../pm/src/storage-service";
 import { createPmToolsService } from "../../../pm/src/tools-service";
 import { createPmWorkspacesService } from "../../../pm/src/workspaces-service";
@@ -90,6 +110,7 @@ type ControlPlaneRuntime = {
   toolArtifactStore: ToolArtifactStore;
   fetchOpenApiDocument: typeof fetchOpenApiDocument;
   handleControlPlane: (request: Request) => Promise<Response>;
+  handleMcp: (request: Request, workspaceId: string) => Promise<Response>;
   dispose: () => Promise<void>;
 };
 
@@ -126,6 +147,22 @@ const resolveControlPlaneDataDir = (): string =>
 
 const resolveStateRootDir = (): string =>
   defaultControlPlaneStateRootDir;
+
+const readConfiguredRuntimeKind = (value: string | undefined): string | undefined => {
+  const normalized = value?.trim();
+  return normalized && normalized.length > 0 ? normalized : undefined;
+};
+
+const readBooleanFlag = (value: string | undefined): boolean => {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+};
+
+const readConfiguredToolExposureMode = (
+  value: string | undefined,
+): ExecuteToolExposureMode =>
+  parseExecuteToolExposureMode(value ?? undefined) ??
+  defaultExecuteToolExposureMode;
 
 const openApiSyncRetryDelayMs = 300;
 
@@ -256,6 +293,35 @@ const createControlPlaneRuntime = async (): Promise<ControlPlaneRuntime> => {
 
   const sourceStore = persistence.sourceStore;
   const toolArtifactStore = persistence.toolArtifactStore;
+  const runtimeAdapterList = [
+    makeLocalInProcessRuntimeAdapter(),
+    makeDenoSubprocessRuntimeAdapter(),
+    makeCloudflareWorkerLoaderRuntimeAdapter(),
+  ];
+  const runtimeAdapters = makeRuntimeAdapterRegistry(runtimeAdapterList);
+  const defaultRuntimeKind =
+    readConfiguredRuntimeKind(process.env.PM_RUNTIME_KIND)
+    ?? runtimeAdapterList[0]?.kind
+    ?? "local-inproc";
+  const requireToolApprovals = readBooleanFlag(process.env.PM_REQUIRE_TOOL_APPROVALS);
+  const defaultToolExposureMode = readConfiguredToolExposureMode(
+    process.env.PM_TOOL_EXPOSURE_MODE,
+  );
+  const toolProviderRegistry = makeToolProviderRegistry([
+    makeOpenApiToolProvider(),
+    makeMcpToolProvider(),
+    makeGraphqlToolProvider(),
+  ]);
+  const persistentApprovalPolicy = createPmPersistentToolApprovalPolicy(
+    persistence.rows,
+    {
+      requireApprovals: requireToolApprovals,
+    },
+  );
+  const mcpHandlers = new Map<
+    string,
+    (request: Request) => Promise<Response>
+  >();
 
   const sourceCatalog = makeSourceCatalogService(sourceStore);
   const sourceManager = makeSourceManagerService(toolArtifactStore);
@@ -373,12 +439,44 @@ const createControlPlaneRuntime = async (): Promise<ControlPlaneRuntime> => {
     PmActorLive(persistence.rows),
   );
 
+  const resolveMcpHandler = (workspaceId: string): ((request: Request) => Promise<Response>) => {
+    const existing = mcpHandlers.get(workspaceId);
+    if (existing) {
+      return existing;
+    }
+
+    const toolRegistry = createSourceToolRegistry({
+      workspaceId,
+      sourceStore,
+      toolArtifactStore,
+      toolProviderRegistry,
+      approvalPolicy: persistentApprovalPolicy,
+    });
+    const executeRuntimeRun = createPmExecuteRuntimeRun({
+      defaultRuntimeKind,
+      runtimeAdapters,
+      toolRegistry,
+    });
+    const runExecutor = createRunExecutor(executeRuntimeRun);
+    const next = createPmMcpHandler(runExecutor.executeRun, {
+      toolRegistry,
+      defaultToolExposureMode,
+    });
+
+    mcpHandlers.set(workspaceId, next);
+    return next;
+  };
+
   return {
     persistence,
     sourceStore,
     toolArtifactStore,
     fetchOpenApiDocument,
     handleControlPlane: controlPlaneWebHandler.handler,
+    handleMcp: async (request, workspaceId) => {
+      const handler = resolveMcpHandler(workspaceId);
+      return handler(request);
+    },
     dispose: async () => {
       await controlPlaneWebHandler.dispose();
       await persistence.close();

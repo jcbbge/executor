@@ -65,13 +65,6 @@ type SourceGroup = {
   toolCount: number;
 };
 
-const isLocalHost = (hostname: string): boolean =>
-  hostname === "localhost"
-  || hostname === "127.0.0.1"
-  || hostname === "0.0.0.0"
-  || hostname === "::1"
-  || hostname === "[::1]";
-
 // ---------------------------------------------------------------------------
 // Search helpers (ported from old executor explorer-derived.ts)
 // ---------------------------------------------------------------------------
@@ -407,11 +400,7 @@ export function ToolsView(props: {
       return `http://127.0.0.1:8788/v1/mcp?workspaceId=${encodeURIComponent(workspaceId)}`;
     }
 
-    const baseOrigin = isLocalHost(window.location.hostname)
-      ? "http://127.0.0.1:8788"
-      : window.location.origin;
-
-    const url = new URL("/v1/mcp", baseOrigin);
+    const url = new URL("/v1/mcp", window.location.origin);
     url.searchParams.set("workspaceId", workspaceId);
     return url.toString();
   }, [props.mcpBaseUrl, workspaceId]);

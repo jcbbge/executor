@@ -131,7 +131,7 @@ const defaultDenoExecutable = (): string => {
 };
 
 const workerScriptPath = fileURLToPath(
-  new URL("./deno-subprocess-worker.mjs", import.meta.url),
+  new URL("./deno-subprocess-worker.mjs", import.meta.url).toString(),
 );
 
 const writeMessage = (
