@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 
-import { createStaticDiscoveryFromTools, toExecutorTool } from "./index";
+import { createStaticDiscoveryFromTools, createToolsFromAiSdkTools } from "./index";
 
 const listIssues = tool({
   description: "List repository issues",
@@ -26,18 +26,15 @@ const createIssue = tool({
   }),
 });
 
-const wrappedTools = {
-  "github.issues.list": listIssues,
-  "github.issues.create": toExecutorTool({
-    tool: createIssue,
-    metadata: {
-      interaction: "required",
-    },
-  }),
-};
+const wrappedTools = createToolsFromAiSdkTools({
+  tools: {
+    "github.issues.list": listIssues,
+    "github.issues.create": createIssue,
+  },
+  sourceKey: "api.github",
+});
 
 export const staticDemo = createStaticDiscoveryFromTools({
   tools: wrappedTools,
   sourceKey: "api.github",
 });
-

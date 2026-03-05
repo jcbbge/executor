@@ -1,11 +1,14 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 
 import {
   createDynamicDiscovery,
   createStaticDiscoveryFromTools,
+  createSystemToolMap,
   executeCodeWithTools,
   makeToolInvokerFromTools,
+  mergeToolMaps,
   toTool,
   type CodeExecutor,
   type ToolDescriptor,
@@ -15,17 +18,39 @@ import {
 
 const asToolPath = (value: string): ToolPath => value as ToolPath;
 
+const numberPairInputSchema = Schema.standardSchemaV1(
+  Schema.Struct({
+    a: Schema.Number,
+    b: Schema.Number,
+  }),
+);
+
+const titleInputSchema = Schema.standardSchemaV1(
+  Schema.Struct({
+    title: Schema.String,
+  }),
+);
+
+const messageInputSchema = Schema.standardSchemaV1(
+  Schema.Struct({
+    message: Schema.String,
+  }),
+);
+
+
 describe("codemode-core", () => {
   it.effect("builds static discovery from tool map keys", () =>
     Effect.gen(function* () {
       const tools = {
         "math.add": {
           description: "Add two numbers",
+          inputSchema: numberPairInputSchema,
           execute: async ({ a, b }: { a: number; b: number }) => ({ sum: a + b }),
         },
         "issues.create": toTool({
           tool: {
             description: "Create issue",
+            inputSchema: titleInputSchema,
             execute: async ({ title }: { title: string }) => ({ id: "issue_1", title }),
           },
           metadata: {
@@ -115,14 +140,71 @@ describe("codemode-core", () => {
     }),
   );
 
+  it.effect("system tools can be composed as normal tools", () =>
+    Effect.gen(function* () {
+      const descriptors: Record<string, ToolDescriptor> = {
+        "source.issues.create": {
+          path: asToolPath("source.issues.create"),
+          sourceKey: "source.issues",
+          description: "Create issue",
+          interaction: "required",
+          inputHint: "object",
+          outputHint: "object",
+        },
+      };
+
+      const directory = {
+        listNamespaces: () =>
+          Effect.succeed([{ namespace: "source.issues", toolCount: 1 }]),
+        listTools: () =>
+          Effect.succeed([{ path: asToolPath("source.issues.create") }]),
+        getByPath: ({ path }: { path: ToolPath; includeSchemas: boolean }) =>
+          Effect.succeed(descriptors[path] ?? null),
+        getByPaths: ({ paths }: { paths: readonly ToolPath[]; includeSchemas: boolean }) =>
+          Effect.succeed(paths.map((path) => descriptors[path]).filter(Boolean)),
+      };
+
+      const search = {
+        search: () =>
+          Effect.succeed([
+            { path: asToolPath("source.issues.create"), score: 0.93 },
+          ]),
+      };
+
+      const systemTools = createSystemToolMap({ directory, search });
+      const allTools = mergeToolMaps([
+        {
+          "math.add": {
+            inputSchema: numberPairInputSchema,
+            execute: ({ a, b }: { a: number; b: number }) => ({ sum: a + b }),
+          },
+        },
+        systemTools,
+      ]);
+
+      const invoker = makeToolInvokerFromTools({ tools: allTools });
+      const discovered = yield* invoker.invoke({
+        path: "discover",
+        args: { query: "create issue", limit: 5 },
+      });
+
+      expect(discovered).toMatchObject({
+        bestPath: "source.issues.create",
+        total: 1,
+      });
+    }),
+  );
+
   it.effect("executes code against tool map via executor contract", () =>
     Effect.gen(function* () {
       const tools = {
         "math.add": {
+          inputSchema: numberPairInputSchema,
           execute: async ({ a, b }: { a: number; b: number }) => ({ sum: a + b }),
         },
         "notifications.send": toTool({
           tool: {
+            inputSchema: messageInputSchema,
             execute: async ({ message }: { message: string }) => ({ delivered: true, message }),
           },
           metadata: { interaction: "required" },
@@ -170,6 +252,7 @@ describe("codemode-core", () => {
       const toolInvoker = makeToolInvokerFromTools({
         tools: {
           "math.add": {
+            inputSchema: numberPairInputSchema,
             execute: ({ a, b }: { a: number; b: number }) => {
               mathCalls += 1;
               return { sum: a + b };

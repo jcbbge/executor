@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 
 import {
   createCodeTool,
@@ -9,14 +10,30 @@ import {
 } from "@executor-v3/ai-sdk-adapter/ai";
 import { makeInProcessExecutor } from "@executor-v3/runtime-local-inproc";
 
+const numberPairInputSchema = Schema.standardSchemaV1(
+  Schema.Struct({
+    a: Schema.Number,
+    b: Schema.Number,
+  }),
+);
+
+const messageInputSchema = Schema.standardSchemaV1(
+  Schema.Struct({
+    message: Schema.String,
+  }),
+);
+
+
 const tools = {
   "math.add": {
     description: "Add two numbers",
+    inputSchema: numberPairInputSchema,
     execute: ({ a, b }: { a: number; b: number }) => ({ sum: a + b }),
   },
   "notifications.send": toExecutorTool({
     tool: {
       description: "Send a message",
+      inputSchema: messageInputSchema,
       execute: ({ message }: { message: string }) => ({ delivered: true, message }),
     },
     metadata: {

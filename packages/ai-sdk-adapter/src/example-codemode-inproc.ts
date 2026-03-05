@@ -4,7 +4,11 @@ import { z } from "zod";
 
 import { makeInProcessExecutor } from "@executor-v3/runtime-local-inproc";
 
-import { createCodeTool, executeCodeWithTools, toExecutorTool } from "./index";
+import {
+  createCodeTool,
+  createToolsFromAiSdkTools,
+  executeCodeWithTools,
+} from "./index";
 
 const addNumbers = tool({
   description: "Add two numbers",
@@ -18,15 +22,13 @@ const notify = tool({
   execute: async ({ message }: { message: string }) => ({ delivered: true, message }),
 });
 
-const tools = {
-  "math.add": addNumbers,
-  "notifications.send": toExecutorTool({
-    tool: notify,
-    metadata: {
-      interaction: "required",
-    },
-  }),
-};
+const tools = createToolsFromAiSdkTools({
+  tools: {
+    "math.add": addNumbers,
+    "notifications.send": notify,
+  },
+  sourceKey: "in_memory.demo",
+});
 
 const executor = makeInProcessExecutor();
 
