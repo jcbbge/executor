@@ -85,6 +85,14 @@ export type ToolMetadata = {
   sourceKey?: string;
 };
 
+export type ToolExecutionContext = {
+  path: ToolPath;
+  sourceKey: string;
+  metadata?: ToolMetadata;
+  invocation?: ToolInvocationContext;
+  onElicitation?: OnElicitation;
+};
+
 export type ExecutableTool = {
   description?: string;
   inputSchema: StandardSchema;

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@executor-v3/codemode-core": "workspace:*",
+    "@executor-v3/runtime-local-inproc": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "effect": "^3.19.19"
   },

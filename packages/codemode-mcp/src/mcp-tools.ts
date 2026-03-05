@@ -1,12 +1,36 @@
+import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as PartitionedSemaphore from "effect/PartitionedSemaphore";
 
 import {
   standardSchemaFromJsonSchema,
   toTool,
+  type ElicitationRequest,
+  type ElicitationResponse,
+  type ToolExecutionContext,
   type ToolMap,
+  type ToolPath,
   unknownInputSchema,
 } from "@executor-v3/codemode-core";
+
+import {
+  createInteractionId,
+  hasElicitationRequestHandler,
+  isUrlElicitationRequiredError,
+  readMcpElicitationRequest,
+  readUnknownRecord,
+  toMcpElicitationResponse,
+} from "./mcp-elicitation-bridge";
+import {
+  extractMcpToolManifestFromListToolsResult,
+  joinToolPath,
+  type McpToolManifest,
+  type McpToolManifestEntry,
+} from "./mcp-manifest";
+
+export type { McpToolManifest, McpToolManifestEntry };
+export { extractMcpToolManifestFromListToolsResult };
 
 export type McpClientLike = {
   listTools: () => Promise<unknown>;
@@ -23,19 +47,6 @@ export type McpConnection = {
 
 export type McpConnector = () => Promise<McpConnection>;
 
-export type McpToolManifestEntry = {
-  toolId: string;
-  toolName: string;
-  description: string | null;
-  inputSchemaJson?: string;
-  outputSchemaJson?: string;
-};
-
-export type McpToolManifest = {
-  version: 1;
-  tools: readonly McpToolManifestEntry[];
-};
-
 type McpDiscoveryStage = "connect" | "list_tools" | "call_tool";
 
 export class McpToolsError extends Data.TaggedError("McpToolsError")<{
@@ -46,41 +57,6 @@ export class McpToolsError extends Data.TaggedError("McpToolsError")<{
 
 const toDetails = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
-
-const toRecord = (value: unknown): Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-
-const sanitizeToolId = (value: string): string => {
-  const normalized = value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-
-  return normalized.length > 0 ? normalized : "tool";
-};
-
-const uniqueToolId = (value: string, byBase: Map<string, number>): string => {
-  const base = sanitizeToolId(value);
-  const count = (byBase.get(base) ?? 0) + 1;
-  byBase.set(base, count);
-
-  return count === 1 ? base : `${base}_${count}`;
-};
-
-const stringifyJson = (value: unknown): string | undefined => {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return undefined;
-  }
-};
 
 const inputSchemaFromManifest = (inputSchemaJson: string | undefined) => {
   if (!inputSchemaJson) {
@@ -97,59 +73,6 @@ const inputSchemaFromManifest = (inputSchemaJson: string | undefined) => {
   }
 };
 
-
-const readListedTools = (value: unknown): Array<Record<string, unknown>> => {
-  const root = toRecord(value);
-  const tools = root.tools;
-  if (!Array.isArray(tools)) {
-    return [];
-  }
-
-  return tools
-    .map((tool) => toRecord(tool))
-    .filter((tool) => Object.keys(tool).length > 0);
-};
-
-export const extractMcpToolManifestFromListToolsResult = (
-  listToolsResult: unknown,
-): McpToolManifest => {
-  const byBase = new Map<string, number>();
-
-  const tools = readListedTools(listToolsResult)
-    .map((tool): McpToolManifestEntry | null => {
-      const toolNameRaw = tool.name;
-      const toolName = typeof toolNameRaw === "string" ? toolNameRaw.trim() : "";
-      if (toolName.length === 0) {
-        return null;
-      }
-
-      return {
-        toolId: uniqueToolId(toolName, byBase),
-        toolName,
-        description:
-          typeof tool.description === "string" ? tool.description : null,
-        inputSchemaJson:
-          stringifyJson(tool.inputSchema)
-          ?? stringifyJson(tool.parameters),
-        outputSchemaJson: stringifyJson(tool.outputSchema),
-      };
-    })
-    .filter((tool): tool is McpToolManifestEntry => tool !== null);
-
-  return {
-    version: 1,
-    tools,
-  };
-};
-
-const joinToolPath = (namespace: string | undefined, toolId: string): string => {
-  if (!namespace || namespace.trim().length === 0) {
-    return toolId;
-  }
-
-  return `${namespace}.${toolId}`;
-};
-
 const withConnection = async <A>(
   connect: McpConnector,
   run: (connection: McpConnection) => Promise<A>,
@@ -160,6 +83,144 @@ const withConnection = async <A>(
     return await run(connection);
   } finally {
     await connection.close?.().catch(() => undefined);
+  }
+};
+
+const elicitationClientSemaphore = PartitionedSemaphore.makeUnsafe<McpClientLike>({
+  permits: 1,
+});
+
+const withElicitationClientLock = <A>(
+  client: McpClientLike,
+  run: () => Promise<A>,
+): Promise<A> =>
+  Effect.runPromise(
+    elicitationClientSemaphore.withPermits(client, 1)(
+      Effect.tryPromise({
+        try: run,
+        catch: (cause) =>
+          cause instanceof Error || cause instanceof McpToolsError
+            ? cause
+            : new Error(String(cause)),
+      }),
+    ),
+  );
+
+const resolveElicitationResponse = async (input: {
+  toolName: string;
+  onElicitation: NonNullable<ToolExecutionContext["onElicitation"]>;
+  interactionId: string;
+  path: ToolPath;
+  sourceKey: string;
+  args: Record<string, unknown>;
+  executionContext?: ToolExecutionContext;
+  elicitation: ElicitationRequest;
+}): Promise<ElicitationResponse> => {
+  try {
+    return await Effect.runPromise(
+      input.onElicitation({
+        interactionId: input.interactionId,
+        path: input.path,
+        sourceKey: input.sourceKey,
+        args: input.args,
+        metadata: input.executionContext?.metadata,
+        context: input.executionContext?.invocation,
+        elicitation: input.elicitation,
+      }),
+    );
+  } catch (cause) {
+    throw new McpToolsError({
+      stage: "call_tool",
+      message: `Failed resolving elicitation for ${input.toolName}`,
+      details: toDetails(cause),
+    });
+  }
+};
+
+const installMcpElicitationHandler = (input: {
+  client: McpClientLike;
+  toolName: string;
+  onElicitation: NonNullable<ToolExecutionContext["onElicitation"]>;
+  path: ToolPath;
+  sourceKey: string;
+  args: Record<string, unknown>;
+  executionContext?: ToolExecutionContext;
+}): void => {
+  if (!hasElicitationRequestHandler(input.client)) {
+    throw new McpToolsError({
+      stage: "call_tool",
+      message: `MCP client does not support elicitation callbacks for ${input.toolName}`,
+      details: null,
+    });
+  }
+
+  let sequence = 0;
+
+  input.client.setRequestHandler(ElicitRequestSchema, async (request) => {
+    const elicitation = readMcpElicitationRequest(request.params);
+    sequence += 1;
+    const interactionId = createInteractionId({
+      path: input.path,
+      invocation: input.executionContext?.invocation,
+      elicitation,
+      sequence,
+    });
+
+    try {
+      const response = await resolveElicitationResponse({
+        toolName: input.toolName,
+        onElicitation: input.onElicitation,
+        interactionId,
+        path: input.path,
+        sourceKey: input.sourceKey,
+        args: input.args,
+        executionContext: input.executionContext,
+        elicitation,
+      });
+
+      return toMcpElicitationResponse(response);
+    } catch {
+      return { action: "cancel" as const };
+    }
+  });
+};
+
+const resolveUrlElicitations = async (input: {
+  cause: {
+    elicitations: ReadonlyArray<ElicitationRequest>;
+  };
+  toolName: string;
+  onElicitation: NonNullable<ToolExecutionContext["onElicitation"]>;
+  path: ToolPath;
+  sourceKey: string;
+  args: Record<string, unknown>;
+  executionContext?: ToolExecutionContext;
+}): Promise<void> => {
+  for (const elicitation of input.cause.elicitations) {
+    const interactionId = createInteractionId({
+      path: input.path,
+      invocation: input.executionContext?.invocation,
+      elicitation,
+    });
+
+    const response = await resolveElicitationResponse({
+      toolName: input.toolName,
+      onElicitation: input.onElicitation,
+      interactionId,
+      path: input.path,
+      sourceKey: input.sourceKey,
+      args: input.args,
+      executionContext: input.executionContext,
+      elicitation,
+    });
+
+    if (response.action !== "accept") {
+      throw new McpToolsError({
+        stage: "call_tool",
+        message: `URL elicitation was not accepted for ${input.toolName}`,
+        details: response.action,
+      });
+    }
   }
 };
 
@@ -189,22 +250,69 @@ export const createMcpToolsFromManifest = (input: {
           tool: {
             description: entry.description ?? `MCP tool: ${entry.toolName}`,
             inputSchema: inputSchemaFromManifest(entry.inputSchemaJson),
-            execute: async (args: unknown) =>
+            execute: async (
+              args: unknown,
+              executionContext?: ToolExecutionContext,
+            ) =>
               withConnection(input.connect, async (connection) => {
-                const payloadArgs = toRecord(args);
+                const payloadArgs = readUnknownRecord(args);
 
-                try {
-                  return await connection.client.callTool({
-                    name: entry.toolName,
-                    arguments: payloadArgs,
-                  });
-                } catch (cause) {
-                  throw new McpToolsError({
-                    stage: "call_tool",
-                    message: `Failed invoking MCP tool: ${entry.toolName}`,
-                    details: toDetails(cause),
-                  });
-                }
+                const runCallFlow = async (): Promise<unknown> => {
+                  const onElicitation = executionContext?.onElicitation;
+                  if (onElicitation) {
+                    installMcpElicitationHandler({
+                      client: connection.client,
+                      toolName: entry.toolName,
+                      onElicitation,
+                      path,
+                      sourceKey,
+                      args: payloadArgs,
+                      executionContext,
+                    });
+                  }
+
+                  const callTool = () =>
+                    connection.client.callTool({
+                      name: entry.toolName,
+                      arguments: payloadArgs,
+                    });
+
+                  let retries = 0;
+                  while (true) {
+                    try {
+                      return await callTool();
+                    } catch (cause) {
+                      if (
+                        onElicitation
+                        && isUrlElicitationRequiredError(cause)
+                        && retries < 2
+                      ) {
+                        await resolveUrlElicitations({
+                          cause,
+                          toolName: entry.toolName,
+                          onElicitation,
+                          path,
+                          sourceKey,
+                          args: payloadArgs,
+                          executionContext,
+                        });
+
+                        retries += 1;
+                        continue;
+                      }
+
+                      throw new McpToolsError({
+                        stage: "call_tool",
+                        message: `Failed invoking MCP tool: ${entry.toolName}`,
+                        details: toDetails(cause),
+                      });
+                    }
+                  }
+                };
+
+                return executionContext?.onElicitation
+                  ? withElicitationClientLock(connection.client, runCallFlow)
+                  : runCallFlow();
               }),
           },
           metadata: {

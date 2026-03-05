@@ -548,7 +548,16 @@ export const makeToolInvokerFromTools = (input: {
         });
 
         return yield* Effect.tryPromise({
-          try: () => Promise.resolve(entry.tool.execute(executableInput)),
+          try: () =>
+            Promise.resolve(
+              entry.tool.execute(executableInput, {
+                path: entry.path,
+                sourceKey: entry.metadata?.sourceKey ?? "in_memory.tools",
+                metadata: entry.metadata,
+                invocation: context,
+                onElicitation: input.onElicitation,
+              }),
+            ),
           catch: toError,
         });
       }),

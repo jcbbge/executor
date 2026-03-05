@@ -68,7 +68,7 @@ export const createSdkMcpConnector = (
         name: input.clientName ?? "executor-v3-codemode-mcp",
         version: input.clientVersion ?? "0.1.0",
       },
-      { capabilities: {} },
+      { capabilities: { elicitation: { form: {}, url: {} } } },
     );
 
   return async () => {
