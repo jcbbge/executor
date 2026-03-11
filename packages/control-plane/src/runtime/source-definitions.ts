@@ -158,6 +158,24 @@ const validateSourceByKind = (source: Source): Effect.Effect<Source, Error, neve
       return source;
     }
 
+    if (source.kind === "content") {
+      // Content sources store basePath in endpoint and fileGlob in queryParams.
+      // Transport, headers, specUrl, and defaultHeaders are not applicable.
+      if (source.transport !== null || source.headers !== null) {
+        return yield* Effect.fail(
+          new Error("Content sources cannot define MCP transport settings"),
+        );
+      }
+
+      if (source.specUrl !== null || source.defaultHeaders !== null) {
+        return yield* Effect.fail(
+          new Error("Content sources cannot define OpenAPI settings"),
+        );
+      }
+
+      return source;
+    }
+
     if (source.transport !== null || source.queryParams !== null || source.headers !== null) {
       return yield* Effect.fail(
         new Error(`${source.kind} sources cannot define MCP transport settings`),

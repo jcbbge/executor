@@ -154,6 +154,13 @@ const ConnectSourcePayloadSchema = Schema.Union(
     queryParams: Schema.optional(Schema.NullOr(StringMapSchema)),
     headers: Schema.optional(Schema.NullOr(StringMapSchema)),
   }),
+  Schema.Struct({
+    kind: Schema.Literal("content"),
+    basePath: Schema.String,
+    fileGlob: Schema.String,
+    namespace: Schema.String,
+    indexStrategy: Schema.optional(Schema.Literal("flat")),
+  }),
 );
 
 export type ConnectSourcePayload = typeof ConnectSourcePayloadSchema.Type;

@@ -13,6 +13,7 @@ import { SourceIdSchema, WorkspaceIdSchema } from "../ids";
 export const ToolArtifactProviderKindSchema = Schema.Literal(
   "mcp",
   "openapi",
+  "content",
 );
 
 export const ToolArtifactParameterLocationSchema = Schema.Literal(

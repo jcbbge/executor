@@ -837,6 +837,93 @@ const addExecutorHttpSource = (input: {
     });
   });
 
+export type ConnectContentSourceInput = {
+  workspaceId: WorkspaceId;
+  basePath: string;
+  fileGlob: string;
+  namespace: string;
+};
+
+const connectContentSourceInternal = (input: {
+  rows: SqlControlPlaneRows;
+  sourceInput: ConnectContentSourceInput;
+  resolveSecretMaterial: ResolveSecretMaterial;
+}): Effect.Effect<ExecutorSourceAddResult, Error, never> =>
+  Effect.gen(function* () {
+    const { workspaceId, basePath, fileGlob, namespace } = input.sourceInput;
+    const now = Date.now();
+
+    // Find existing content source for this basePath + namespace
+    const existingSources = yield* loadSourcesInWorkspace(input.rows, workspaceId);
+    const existing = existingSources.find(
+      (s) => s.kind === "content" && s.endpoint === basePath && s.namespace === namespace,
+    );
+
+    // basePath stored in endpoint; fileGlob stored in queryParams as { fileGlob: "..." }
+    const draftSource: Source = existing
+      ? {
+          ...existing,
+          status: "probing",
+          queryParams: { fileGlob },
+          updatedAt: now,
+        }
+      : {
+          id: SourceIdSchema.make(`src_${crypto.randomUUID()}`),
+          workspaceId,
+          name: namespace,
+          kind: "content",
+          endpoint: basePath,
+          status: "probing",
+          enabled: true,
+          namespace,
+          transport: null,
+          queryParams: { fileGlob },
+          headers: null,
+          specUrl: null,
+          defaultHeaders: null,
+          auth: { kind: "none" },
+          sourceHash: null,
+          lastError: null,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+    const persistedDraft = yield* persistSource(input.rows, draftSource);
+
+    const synced = yield* Effect.either(
+      syncSourceToolArtifacts({
+        rows: input.rows,
+        source: {
+          ...persistedDraft,
+          status: "connected",
+        },
+        resolveSecretMaterial: input.resolveSecretMaterial,
+      }),
+    );
+
+    return yield* Either.match(synced, {
+      onLeft: (error) =>
+        updateSourceStatus(input.rows, persistedDraft, {
+          status: "error",
+          lastError: error.message,
+        }).pipe(
+          Effect.zipRight(Effect.fail(error)),
+        ),
+      onRight: () =>
+        updateSourceStatus(input.rows, persistedDraft, {
+          status: "connected",
+          lastError: null,
+        }).pipe(
+          Effect.map((source) =>
+            ({
+              kind: "connected",
+              source,
+            } satisfies ExecutorSourceAddResult)
+          ),
+        ),
+    });
+  });
+
 type RuntimeSourceAuthServiceShape = {
   getSourceById: (input: {
     workspaceId: WorkspaceId;
@@ -857,6 +944,9 @@ type RuntimeSourceAuthServiceShape = {
   connectMcpSource: (
     input: ConnectMcpSourceInput,
   ) => Effect.Effect<McpSourceConnectResult, Error, never>;
+  connectContentSource: (
+    input: ConnectContentSourceInput,
+  ) => Effect.Effect<ExecutorSourceAddResult, Error, never>;
   startSourceOAuthSession: (
     input: StartSourceOAuthSessionInput,
   ) => Effect.Effect<StartSourceOAuthSessionResult, Error, never>;
@@ -941,6 +1031,13 @@ export const createRuntimeSourceAuthService = (input: {
       queryParams: sourceInput.queryParams,
       headers: sourceInput.headers,
       baseUrl: sourceInput.baseUrl,
+      resolveSecretMaterial,
+    }),
+
+  connectContentSource: (sourceInput) =>
+    connectContentSourceInternal({
+      rows: input.rows,
+      sourceInput,
       resolveSecretMaterial,
     }),
 

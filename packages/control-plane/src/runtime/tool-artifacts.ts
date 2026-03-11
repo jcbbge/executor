@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { basename, extname } from "node:path";
 import {
   FetchHttpClient,
   HttpClient,
@@ -115,7 +117,7 @@ const toMcpToolArtifactRecord = (input: {
 const shouldIndexSource = (source: Source): boolean =>
   source.enabled
   && source.status === "connected"
-  && (source.kind === "mcp" || source.kind === "openapi" || source.kind === "graphql");
+  && (source.kind === "mcp" || source.kind === "openapi" || source.kind === "graphql" || source.kind === "content");
 
 export const namespaceFromSourceName = (name: string): string => {
   const normalized = name
@@ -414,6 +416,184 @@ const indexGraphqlSourceToolArtifacts = (input: {
     );
   });
 
+const extractFirstHeading = (md: string): string | null => {
+  const match = /^#\s+(.+)/m.exec(md);
+  return match ? match[1].trim() : null;
+};
+
+const extractFirstParagraph = (md: string): string | null => {
+  const lines = md.split("\n");
+  const paragraphLines: string[] = [];
+  let inParagraph = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      if (inParagraph) break;
+      continue;
+    }
+
+    inParagraph = true;
+    paragraphLines.push(trimmed);
+  }
+
+  return paragraphLines.length > 0 ? paragraphLines.join(" ") : null;
+};
+
+const buildWeightedSearchText = (input: {
+  title: string;
+  description: string;
+  body: string;
+}): string => {
+  const titlePart = Array(12).fill(input.title.toLowerCase().trim()).join(" ");
+  const descriptionPart = Array(8).fill(input.description.toLowerCase().trim()).join(" ");
+  const bodyPart = input.body.toLowerCase().trim();
+  return [titlePart, descriptionPart, bodyPart].filter(Boolean).join(" ");
+};
+
+const discoverAndIndexContentSourceToolArtifacts = (input: {
+  rows: SqlControlPlaneRows;
+  source: Source;
+}): Effect.Effect<void, Error, never> =>
+  Effect.gen(function* () {
+    if (input.source.kind !== "content") {
+      return;
+    }
+
+    const basePath = input.source.endpoint; // basePath stored in endpoint column
+    const fileGlob = input.source.queryParams?.fileGlob ?? "**/*.md";
+    const namespace = input.source.namespace ?? namespaceFromSourceName(input.source.name);
+    const now = Date.now();
+
+    const filePaths = yield* Effect.tryPromise({
+      try: async () => {
+        const glob = new Bun.Glob(fileGlob);
+        const paths: string[] = [];
+        for await (const file of glob.scan({ cwd: basePath, absolute: true })) {
+          paths.push(file);
+        }
+
+        return paths;
+      },
+      catch: (cause) =>
+        cause instanceof Error ? cause : new Error(String(cause)),
+    });
+
+    const artifactRecords: IndexedToolArtifactRecord[] = [];
+
+    for (const filePath of filePaths) {
+      const raw = yield* Effect.tryPromise({
+        try: () => readFile(filePath, "utf-8"),
+        catch: (cause) =>
+          cause instanceof Error ? cause : new Error(String(cause)),
+      });
+
+      const fileName = basename(filePath, extname(filePath));
+      const title = extractFirstHeading(raw) ?? fileName;
+      const description = extractFirstParagraph(raw) ?? "";
+      const toolId = `${fileName}.get`;
+      const path = joinToolPath(namespace, toolId);
+      const searchNamespace = catalogNamespaceFromPath(path);
+
+      artifactRecords.push({
+        artifact: {
+          workspaceId: input.source.workspaceId,
+          path,
+          toolId,
+          sourceId: input.source.id,
+          title,
+          description,
+          searchNamespace,
+          searchText: buildWeightedSearchText({ title, description, body: raw }),
+          inputSchemaJson: null,
+          outputSchemaJson: null,
+          providerKind: "content",
+          mcpToolName: null,
+          openApiMethod: null,
+          openApiPathTemplate: filePath, // reuse to store absolute file path for retrieval
+          openApiOperationHash: null,
+          openApiRawToolId: null,
+          openApiOperationId: null,
+          openApiTagsJson: null,
+          openApiRequestBodyRequired: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+    }
+
+    // Directory-level tools: list and search
+    const listToolId = "list";
+    const listPath = joinToolPath(namespace, listToolId);
+    artifactRecords.push({
+      artifact: {
+        workspaceId: input.source.workspaceId,
+        path: listPath,
+        toolId: listToolId,
+        sourceId: input.source.id,
+        title: `List ${namespace}`,
+        description: `List all items in ${namespace}`,
+        searchNamespace: catalogNamespaceFromPath(listPath),
+        searchText: normalizeSearchText(listPath, namespace, `list ${namespace}`),
+        inputSchemaJson: null,
+        outputSchemaJson: null,
+        providerKind: "content",
+        mcpToolName: null,
+        openApiMethod: null,
+        openApiPathTemplate: null,
+        openApiOperationHash: null,
+        openApiRawToolId: null,
+        openApiOperationId: null,
+        openApiTagsJson: null,
+        openApiRequestBodyRequired: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+
+    const searchToolId = "search";
+    const searchPath = joinToolPath(namespace, searchToolId);
+    artifactRecords.push({
+      artifact: {
+        workspaceId: input.source.workspaceId,
+        path: searchPath,
+        toolId: searchToolId,
+        sourceId: input.source.id,
+        title: `Search ${namespace}`,
+        description: `Search ${namespace} by query`,
+        searchNamespace: catalogNamespaceFromPath(searchPath),
+        searchText: normalizeSearchText(searchPath, namespace, `search ${namespace}`),
+        inputSchemaJson: JSON.stringify({
+          type: "object",
+          properties: { query: { type: "string" } },
+          required: ["query"],
+        }),
+        outputSchemaJson: null,
+        providerKind: "content",
+        mcpToolName: null,
+        openApiMethod: null,
+        openApiPathTemplate: null,
+        openApiOperationHash: null,
+        openApiRawToolId: null,
+        openApiOperationId: null,
+        openApiTagsJson: null,
+        openApiRequestBodyRequired: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+
+    yield* input.rows.toolArtifacts.replaceForSource({
+      workspaceId: input.source.workspaceId,
+      sourceId: input.source.id,
+      artifacts: artifactRecords,
+    }).pipe(
+      Effect.mapError((cause) =>
+        cause instanceof Error ? cause : new Error(String(cause)),
+      ),
+    );
+  });
+
 export const syncSourceToolArtifacts = (input: {
   rows: SqlControlPlaneRows;
   source: Source;
@@ -430,6 +610,13 @@ export const syncSourceToolArtifacts = (input: {
         ),
       );
       return;
+    }
+
+    if (input.source.kind === "content") {
+      return yield* discoverAndIndexContentSourceToolArtifacts({
+        rows: input.rows,
+        source: input.source,
+      });
     }
 
     const auth = yield* resolveSourceAuthMaterial({

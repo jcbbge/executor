@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import {
   createSystemToolMap,
   createToolCatalogFromTools,
@@ -1173,6 +1174,65 @@ const createWorkspaceToolInvoker = (input: {
           path: invocation.path,
           args: invocation.args,
           context: invocation.context,
+        });
+      }
+
+      if (artifact.providerKind === "content") {
+        const toolId = storedToolIdFromArtifact(artifact);
+        const namespace = source.namespace ?? namespaceFromSourceName(source.name);
+
+        if (toolId === "list") {
+          const allArtifacts = yield* input.rows.toolArtifacts.searchByWorkspaceId(
+            input.workspaceId,
+            { namespace, query: "" },
+          ).pipe(
+            Effect.mapError((cause) =>
+              cause instanceof Error ? cause : new Error(String(cause)),
+            ),
+          );
+
+          return allArtifacts
+            .filter((a) => a.providerKind === "content" && a.toolId.endsWith(".get"))
+            .map((a) => ({
+              path: a.path,
+              title: a.title,
+              description: a.description,
+            }));
+        }
+
+        if (toolId === "search") {
+          const args = invocation.args as { query?: unknown };
+          const query = typeof args?.query === "string" ? args.query : "";
+          const results = yield* input.rows.toolArtifacts.searchByWorkspaceId(
+            input.workspaceId,
+            { namespace, query },
+          ).pipe(
+            Effect.mapError((cause) =>
+              cause instanceof Error ? cause : new Error(String(cause)),
+            ),
+          );
+
+          return results
+            .filter((a) => a.providerKind === "content" && a.toolId.endsWith(".get"))
+            .map((a) => ({
+              path: a.path,
+              title: a.title,
+              description: a.description,
+            }));
+        }
+
+        // Individual file get — read from stored filePath (openApiPathTemplate)
+        const filePath = artifact.openApiPathTemplate;
+        if (!filePath) {
+          return yield* Effect.fail(
+            new Error(`Content artifact ${artifact.path} is missing file path`),
+          );
+        }
+
+        return yield* Effect.tryPromise({
+          try: () => readFile(filePath, "utf-8"),
+          catch: (cause) =>
+            cause instanceof Error ? cause : new Error(String(cause)),
         });
       }
 

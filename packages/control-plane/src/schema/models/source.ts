@@ -12,6 +12,7 @@ export const SourceKindSchema = Schema.Literal(
   "openapi",
   "graphql",
   "internal",
+  "content",
 );
 
 export const SourceStatusSchema = Schema.Literal(

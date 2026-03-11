@@ -172,7 +172,10 @@ const defaultConnectForm = (discovery?: SourceDiscoveryResult): ConnectFormState
     };
   }
 
-  const kind = discovery.detectedKind as ConnectFormState["kind"];
+  const httpKinds: ReadonlyArray<ConnectFormState["kind"]> = ["mcp", "openapi", "graphql"];
+  const kind: ConnectFormState["kind"] = httpKinds.includes(discovery.detectedKind as ConnectFormState["kind"])
+    ? (discovery.detectedKind as ConnectFormState["kind"])
+    : "openapi";
   const auth = discovery.authInference;
 
   // Map auth suggestion to what backend connect supports

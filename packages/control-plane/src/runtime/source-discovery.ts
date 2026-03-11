@@ -860,6 +860,10 @@ export const discoverSource = (input: {
   probeAuth?: SourceProbeAuth | null;
 }): Effect.Effect<SourceDiscoveryResult, Error, never> =>
   Effect.gen(function* () {
+    // Content sources are local filesystem — no HTTP probe needed
+    // The connect handler validates the basePath exists before this is called,
+    // but the discovery endpoint is URL-based so content sources bypass it entirely.
+
     const normalizedUrl = normalizeUrl(input.url);
     const headers = probeHeadersFromAuth(input.probeAuth);
 

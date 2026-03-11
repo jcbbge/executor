@@ -870,6 +870,7 @@ const makeResolver = (persistence: SqlControlPlanePersistence) =>
       getSourceById: () => Effect.fail(new Error("not implemented in test")),
       addExecutorSource: () => Effect.fail(new Error("not implemented in test")),
       connectMcpSource: () => Effect.fail(new Error("not implemented in test")),
+      connectContentSource: () => Effect.fail(new Error("not implemented in test")),
       startSourceOAuthSession: () => Effect.fail(new Error("not implemented in test")),
       completeSourceOAuthSession: () => Effect.fail(new Error("not implemented in test")),
       completeSourceCredentialSetup: () => Effect.fail(new Error("not implemented in test")),

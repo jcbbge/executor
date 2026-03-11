@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import {
   HttpApiBuilder,
   HttpServerRequest,
@@ -692,6 +693,25 @@ export const ControlPlaneSourcesLive = HttpApiBuilder.group(
                   queryParams: payload.queryParams,
                   headers: payload.headers,
                   baseUrl,
+                });
+              }
+
+              if (payload.kind === "content") {
+                if (!existsSync(payload.basePath)) {
+                  return yield* Effect.fail(
+                    new ControlPlaneBadRequestError({
+                      operation: "sources.connect",
+                      message: `Content source basePath does not exist: ${payload.basePath}`,
+                      details: `basePath "${payload.basePath}" does not exist on disk`,
+                    }),
+                  );
+                }
+
+                return yield* sourceAuthService.connectContentSource({
+                  workspaceId: path.workspaceId,
+                  basePath: payload.basePath,
+                  fileGlob: payload.fileGlob,
+                  namespace: payload.namespace,
                 });
               }
 

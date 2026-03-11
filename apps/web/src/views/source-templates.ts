@@ -13,7 +13,7 @@ export type OpenApiSourceTemplate = SourceTemplateBase & {
 };
 
 export type NonOpenApiSourceTemplate = SourceTemplateBase & {
-  kind: Exclude<Source["kind"], "openapi" | "internal">;
+  kind: Exclude<Source["kind"], "openapi" | "internal" | "content">;
 };
 
 export type SourceTemplate = OpenApiSourceTemplate | NonOpenApiSourceTemplate;
