@@ -17,6 +17,7 @@ import * as Exit from "effect/Exit";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod/v4";
+import { createOrchestratorTools } from "./orchestrator.js";
 
 const pollingIntervalMs = 200;
 
@@ -519,6 +520,27 @@ const createExecutorMcpServer = async (config: {
     },
   );
 
+
+  // Register orchestrator lifecycle tools
+  const orchestratorTools = createOrchestratorTools();
+  
+  server.registerTool(
+    orchestratorTools.serviceStart.name,
+    orchestratorTools.serviceStart.config,
+    orchestratorTools.serviceStart.handler,
+  );
+  
+  server.registerTool(
+    orchestratorTools.serviceStop.name,
+    orchestratorTools.serviceStop.config,
+    orchestratorTools.serviceStop.handler,
+  );
+  
+  server.registerTool(
+    orchestratorTools.serviceStatus.name,
+    orchestratorTools.serviceStatus.config,
+    orchestratorTools.serviceStatus.handler,
+  );
   const syncToolAvailability = () => {
     if (supportsManagedElicitation(server)) {
       executeTool.enable();
