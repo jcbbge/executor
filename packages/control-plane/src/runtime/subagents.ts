@@ -176,6 +176,22 @@ export interface SubagentDelegateInput {
 }
 
 /**
+ * Execute-with-system-prompt input — creates a temporary subagent session, runs it, destroys it.
+ * Used by executor.skill.execute and executor.command.run.
+ */
+export interface ExecuteWithSystemPromptInput {
+  systemPrompt: string;
+  context: string;
+  /** OpenRouter model ID. Defaults to SKILL_EXECUTE_MODEL env var or anthropic/claude-sonnet-4-6 */
+  model?: string;
+  /** Provider. Defaults to "openrouter" */
+  provider?: string;
+}
+
+const DEFAULT_EXECUTE_MODEL = "anthropic/claude-sonnet-4-6";
+const DEFAULT_EXECUTE_PROVIDER = "openrouter";
+
+/**
  * Subagent loader service
  */
 export interface SubagentLoader {
@@ -187,6 +203,11 @@ export interface SubagentLoader {
   exists(name: string): Effect.Effect<boolean, Error>;
   /** Delegate to a subagent via subagent-mcp */
   delegate(input: SubagentDelegateInput): Effect.Effect<string, Error>;
+  /**
+   * Execute arbitrary content as a one-shot subagent: create → delegate → destroy.
+   * Used by executor.skill.execute and executor.command.run to run primitive content.
+   */
+  executeWithSystemPrompt(input: ExecuteWithSystemPromptInput): Effect.Effect<string, Error>;
 }
 
 /**
@@ -333,6 +354,80 @@ export const createSubagentLoader = (config?: SubagentLoaderConfig): SubagentLoa
             return new Error(`Subagent delegation failed: ${error.message}`);
           }
           return new Error(`Subagent delegation failed: ${String(error)}`);
+        },
+      }),
+
+    executeWithSystemPrompt: (input) =>
+      Effect.tryPromise({
+        try: async () => {
+          const sessionName = `exec-${crypto.randomUUID().slice(0, 8)}`;
+          const model = input.model ?? process.env.SKILL_EXECUTE_MODEL ?? DEFAULT_EXECUTE_MODEL;
+          const provider = input.provider ?? DEFAULT_EXECUTE_PROVIDER;
+
+          const callMcp = async (toolName: string, args: Record<string, unknown>) => {
+            const resp = await fetch("http://127.0.0.1:3096/", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+              },
+              body: JSON.stringify({
+                jsonrpc: "2.0",
+                method: "tools/call",
+                params: { name: toolName, arguments: args },
+                id: crypto.randomUUID(),
+              }),
+            });
+            if (!resp.ok) {
+              throw new Error(`subagent-mcp ${toolName} failed: ${resp.status} ${resp.statusText}`);
+            }
+            const text = await resp.text();
+            for (const line of text.split(/\r?\n/)) {
+              if (line.startsWith("data: ")) {
+                try {
+                  const parsed = JSON.parse(line.slice(6));
+                  if (parsed.result) return parsed.result;
+                } catch { /* skip */ }
+              }
+            }
+            return null;
+          };
+
+          // Create ephemeral session
+          await callMcp("subagents_create", {
+            name: sessionName,
+            provider,
+            model,
+            systemPrompt: input.systemPrompt,
+          });
+
+          // Run the skill/command content with provided context
+          let result = "";
+          try {
+            const delegateResult = await callMcp("subagents_delegate", {
+              agent: sessionName,
+              input: input.context,
+            });
+            const content = delegateResult?.content;
+            if (Array.isArray(content)) {
+              result = content.map((c: unknown) => (c as { text?: string }).text || String(c)).join("\n");
+            } else {
+              result = content || delegateResult || "No response";
+            }
+          } finally {
+            // Always clean up the session
+            try {
+              await callMcp("subagents_destroy", { name: sessionName });
+            } catch { /* best-effort cleanup */ }
+          }
+
+          return result;
+        },
+        catch: (error) => {
+          if (error instanceof Error) {
+            return new Error(`Skill execution failed: ${error.message}`);
+          }
+          return new Error(`Skill execution failed: ${String(error)}`);
         },
       }),
   };

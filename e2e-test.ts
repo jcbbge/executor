@@ -52,6 +52,14 @@ async function runAllTests() {
     console.log(`  → Loaded: ${skill.name}`);
   });
 
+  // executor.skill.execute — live test is slow/costly, so this just verifies the tool exists
+  await test("executor.skill.execute (tool present)", async () => {
+    const hits = await (tools as any).discover({ query: "execute skill", limit: 5 });
+    const found = hits.results?.some((h: any) => h.path === "executor.skill.execute");
+    if (!found) throw new Error("executor.skill.execute not in catalog");
+    console.log(`  → executor.skill.execute registered`);
+  });
+
   // 2. RULES
   await test("executor.rule.list", async () => {
     const rules = await (tools as any).executor.rule.list({});
@@ -89,6 +97,13 @@ async function runAllTests() {
     const cmd = await (tools as any).executor.command.load({ name: "kota" });
     if (!cmd.content) throw new Error("No content");
     console.log(`  → Loaded: ${cmd.name}`);
+  });
+
+  await test("executor.command.run (tool present)", async () => {
+    const hits = await (tools as any).discover({ query: "run command", limit: 5 });
+    const found = hits.results?.some((h: any) => h.path === "executor.command.run");
+    if (!found) throw new Error("executor.command.run not in catalog");
+    console.log(`  → executor.command.run registered`);
   });
 
   // 5. HOOKS

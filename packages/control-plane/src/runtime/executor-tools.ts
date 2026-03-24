@@ -91,6 +91,16 @@ const SkillOutputSchema = Schema.Struct({
 
 const SkillListOutputSchema = Schema.Array(SkillMetadataSchema);
 
+const SkillExecuteInputSchema = Schema.Struct({
+  name: Schema.String,
+  context: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
+});
+
+const SkillExecuteOutputSchema = Schema.Struct({
+  result: Schema.String,
+});
+
 // Subagent tool schemas
 const SubagentLoadInputSchema = Schema.Struct({
   name: Schema.String,
@@ -139,6 +149,17 @@ const CommandOutputSchema = Schema.Struct({
   path: Schema.String,
 });
 const CommandListOutputSchema = Schema.Array(CommandMetadataSchema);
+
+const CommandRunInputSchema = Schema.Struct({
+  name: Schema.String,
+  args: Schema.optional(Schema.Array(Schema.String)),
+  context: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
+});
+
+const CommandRunOutputSchema = Schema.Struct({
+  result: Schema.String,
+});
 
 // Hook tool schemas
 const HookLoadInputSchema = Schema.Struct({ name: Schema.String });
@@ -620,6 +641,33 @@ export const createExecutorToolMap = (input: {
     },
   }),
 
+  "executor.skill.execute": toTool({
+    tool: {
+      description: "Execute a skill by name. Creates an ephemeral subagent session with the skill's content as system prompt, delegates the context/input to it, then destroys the session. Returns the subagent's response. Requires subagent-mcp (port 3096) to be running. Optional model override via SKILL_EXECUTE_MODEL env var (default: anthropic/claude-sonnet-4-6 via openrouter).",
+      inputSchema: Schema.standardSchemaV1(SkillExecuteInputSchema),
+      outputSchema: Schema.standardSchemaV1(SkillExecuteOutputSchema),
+      execute: async (args: { name: string; context?: string; model?: string }) => {
+        const skillLoader = createSkillLoader();
+        const skill = await runEffect(skillLoader.load(args.name));
+        const subagentLoader = createSubagentLoader();
+        const result = await runEffect(
+          subagentLoader.executeWithSystemPrompt({
+            systemPrompt: skill.content,
+            context: args.context ?? `Execute the ${args.name} skill.`,
+            model: args.model,
+          }),
+        );
+        return { result };
+      },
+    },
+    metadata: {
+      inputType: "{ name: string; context?: string; model?: string }",
+      outputType: "{ result: string }",
+      sourceKey: "executor",
+      interaction: "auto",
+    },
+  }),
+
   "executor.rule.load": toTool({
     tool: {
       description: "Load a rule by name from the agent primitives schema. Returns the rule content (markdown after YAML frontmatter) and metadata including applicable file globs. Rules are read from AGENTS_SCHEMA_PATH/rules/ (defaults to ~/Documents/_agents/schema/rules/).",
@@ -749,6 +797,38 @@ export const createExecutorToolMap = (input: {
     metadata: {
       inputType: "{}",
       outputType: "Array<{ name: string; description?: string }>",
+      sourceKey: "executor",
+      interaction: "auto",
+    },
+  }),
+
+  "executor.command.run": toTool({
+    tool: {
+      description: "Run a command by name. Loads the command definition, creates an ephemeral subagent session with the command content as system prompt, delegates the args/context to it, then destroys the session. Returns the subagent's response. Requires subagent-mcp (port 3096) to be running.",
+      inputSchema: Schema.standardSchemaV1(CommandRunInputSchema),
+      outputSchema: Schema.standardSchemaV1(CommandRunOutputSchema),
+      execute: async (args: { name: string; args?: string[]; context?: string; model?: string }) => {
+        const commandLoader = createCommandLoader();
+        const command = await runEffect(commandLoader.load(args.name));
+        const subagentLoader = createSubagentLoader();
+        const inputText = args.context
+          ? args.context
+          : args.args?.length
+            ? `Run /${args.name} with args: ${args.args.join(" ")}`
+            : `Run the /${args.name} command.`;
+        const result = await runEffect(
+          subagentLoader.executeWithSystemPrompt({
+            systemPrompt: command.content,
+            context: inputText,
+            model: args.model,
+          }),
+        );
+        return { result };
+      },
+    },
+    metadata: {
+      inputType: "{ name: string; args?: string[]; context?: string; model?: string }",
+      outputType: "{ result: string }",
       sourceKey: "executor",
       interaction: "auto",
     },
