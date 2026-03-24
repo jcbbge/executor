@@ -276,6 +276,7 @@ const loadRunWorkflowText = (): Effect.Effect<string, Error, never> =>
   Effect.acquireUseRelease(
     createSqlControlPlaneRuntime({
       localDataDir: DEFAULT_LOCAL_DATA_DIR,
+      surrealdbUrl: "ws://127.0.0.1:8002/rpc",
     }).pipe(Effect.mapError(toError)),
     (runtime) =>
       Effect.gen(function* () {
@@ -423,6 +424,7 @@ const getDefaultServerOptions = (port: number = DEFAULT_SERVER_PORT) => {
     migrationsFolder: migrationsFolder ?? undefined,
     pidFile: DEFAULT_SERVER_PID_FILE,
     ui: assetsDir ? { assetsDir } : undefined,
+    surrealdbUrl: "ws://127.0.0.1:8002/rpc",
   };
 };
 

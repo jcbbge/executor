@@ -73,6 +73,7 @@ export type StartLocalExecutorServerOptions = {
   readonly executionResolver?: ResolveExecutionEnvironment;
   readonly resolveSecretMaterial?: ResolveSecretMaterial;
   readonly ui?: StaticUiOptions;
+  readonly surrealdbUrl?: string;
 };
 
 export type LocalExecutorRequestHandler = {
@@ -103,6 +104,7 @@ const createRuntime = (
     executionResolver: options.executionResolver,
     resolveSecretMaterial: options.resolveSecretMaterial,
     getLocalServerBaseUrl,
+    surrealdbUrl: options.surrealdbUrl,
   }).pipe(
     Effect.mapError((cause) =>
       cause instanceof Error ? cause : new Error(String(cause)),

@@ -11,6 +11,7 @@ import {
 } from "#api";
 import {
   SqlControlPlanePersistenceLive,
+  SqlControlPlanePersistenceLiveFromSurreal,
   SqlControlPlanePersistenceService,
   SqlControlPlaneRowsLive,
   SqlPersistenceBootstrapError,
@@ -164,15 +165,19 @@ export type SqlControlPlaneRuntime = {
 };
 
 export type CreateSqlControlPlaneRuntimeOptions = CreateSqlRuntimeOptions
-  & RuntimeControlPlaneOptions;
+  & RuntimeControlPlaneOptions
+  & { surrealdbUrl?: string };
 
 export const createSqlControlPlaneRuntime = (
   options: CreateSqlControlPlaneRuntimeOptions,
 ): Effect.Effect<SqlControlPlaneRuntime, SqlPersistenceBootstrapError> =>
   Effect.gen(function* () {
     const scope = yield* Scope.make();
+    const persistenceLayer = options.surrealdbUrl
+      ? SqlControlPlanePersistenceLiveFromSurreal(options.surrealdbUrl)
+      : SqlControlPlanePersistenceLive(options);
     const persistenceAndRowsLayer = SqlControlPlaneRowsLive.pipe(
-      Layer.provideMerge(SqlControlPlanePersistenceLive(options)),
+      Layer.provideMerge(persistenceLayer),
     );
     const runtimeLayer = createRuntimeControlPlaneLayer(options).pipe(
       Layer.provideMerge(persistenceAndRowsLayer),
