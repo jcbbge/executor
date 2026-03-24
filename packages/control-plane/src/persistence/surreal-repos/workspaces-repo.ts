@@ -21,7 +21,7 @@ export const createWorkspacesRepo = (client: SurrealClient) => ({
   getById: (workspaceId: Workspace["id"]) =>
     client.use("rows.workspaces.get_by_id", async (db) => {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `SELECT *, meta::id(id) AS id FROM workspaces WHERE id = type::thing('workspaces', $id) LIMIT 1`,
+        `SELECT *, meta::id(id) AS id FROM workspaces WHERE id = type::record('workspaces', $id) LIMIT 1`,
         { id: workspaceId },
       );
       const rows = result[0] ?? [];
@@ -45,7 +45,7 @@ export const createWorkspacesRepo = (client: SurrealClient) => ({
   ) =>
     client.use("rows.workspaces.update", async (db) => {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `UPDATE type::thing('workspaces', $id) MERGE $patch RETURN *, meta::id(id) AS id`,
+        `UPDATE type::record('workspaces', $id) MERGE $patch RETURN *, meta::id(id) AS id`,
         { id: workspaceId, patch },
       );
       const rows = result[0] ?? [];
@@ -56,7 +56,7 @@ export const createWorkspacesRepo = (client: SurrealClient) => ({
     }),
 
   removeById: (workspaceId: Workspace["id"]) =>
-    client.useTx("rows.workspaces.remove", async (db) => {
+    client.use("rows.workspaces.remove", async (db) => {
       // Get execution IDs
       const execResult = await db.query<[Array<{ id: unknown }>]>(
         `SELECT meta::id(id) AS id FROM executions WHERE workspaceId = $workspaceId`,
@@ -129,7 +129,7 @@ export const createWorkspacesRepo = (client: SurrealClient) => ({
       }
 
       const deleted = await db.query<[Array<Record<string, unknown>>]>(
-        `DELETE type::thing('workspaces', $id) RETURN BEFORE *`,
+        `DELETE type::record('workspaces', $id) RETURN BEFORE`,
         { id: workspaceId },
       );
       const rows = deleted[0] ?? [];

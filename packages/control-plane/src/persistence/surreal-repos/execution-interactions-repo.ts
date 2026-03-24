@@ -14,7 +14,7 @@ export const createExecutionInteractionsRepo = (client: SurrealClient) => ({
   getById: (interactionId: ExecutionInteraction["id"]) =>
     client.use("rows.execution_interactions.get_by_id", async (db) => {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `SELECT *, meta::id(id) AS id FROM execution_interactions WHERE id = type::thing('execution_interactions', $id) LIMIT 1`,
+        `SELECT *, meta::id(id) AS id FROM execution_interactions WHERE id = type::record('execution_interactions', $id) LIMIT 1`,
         { id: interactionId },
       );
       const rows = result[0] ?? [];
@@ -61,7 +61,7 @@ export const createExecutionInteractionsRepo = (client: SurrealClient) => ({
   ) =>
     client.use("rows.execution_interactions.update", async (db) => {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `UPDATE type::thing('execution_interactions', $id) MERGE $patch RETURN *, meta::id(id) AS id`,
+        `UPDATE type::record('execution_interactions', $id) MERGE $patch RETURN *, meta::id(id) AS id`,
         { id: interactionId, patch },
       );
       const rows = result[0] ?? [];

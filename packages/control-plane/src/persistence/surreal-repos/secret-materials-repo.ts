@@ -14,7 +14,7 @@ export const createSecretMaterialsRepo = (client: SurrealClient) => ({
   getById: (id: SecretMaterial["id"]) =>
     client.use("rows.secret_materials.get_by_id", async (db) => {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `SELECT *, meta::id(id) AS id FROM secret_materials WHERE id = type::thing('secret_materials', $id) LIMIT 1`,
+        `SELECT *, meta::id(id) AS id FROM secret_materials WHERE id = type::record('secret_materials', $id) LIMIT 1`,
         { id },
       );
       const rows = result[0] ?? [];
@@ -54,7 +54,7 @@ export const createSecretMaterialsRepo = (client: SurrealClient) => ({
       if (update.value !== undefined) patch.value = update.value;
 
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `UPDATE type::thing('secret_materials', $id) MERGE $patch RETURN meta::id(id) AS id, name, purpose, createdAt, updatedAt`,
+        `UPDATE type::record('secret_materials', $id) MERGE $patch RETURN meta::id(id) AS id, name, purpose, createdAt, updatedAt`,
         { id, patch },
       );
       const rows = result[0] ?? [];
@@ -67,7 +67,7 @@ export const createSecretMaterialsRepo = (client: SurrealClient) => ({
   removeById: (id: SecretMaterial["id"]) =>
     client.use("rows.secret_materials.remove", async (db) => {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `DELETE type::thing('secret_materials', $id) RETURN BEFORE *`,
+        `DELETE type::record('secret_materials', $id) RETURN BEFORE`,
         { id },
       );
       const rows = result[0] ?? [];

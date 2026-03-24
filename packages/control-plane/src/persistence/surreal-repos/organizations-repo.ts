@@ -31,7 +31,7 @@ export const createOrganizationsRepo = (client: SurrealClient) => ({
   getById: (organizationId: Organization["id"]) =>
     client.use("rows.organizations.get_by_id", async (db) => {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `SELECT *, meta::id(id) AS id FROM organizations WHERE id = type::thing('organizations', $id) LIMIT 1`,
+        `SELECT *, meta::id(id) AS id FROM organizations WHERE id = type::record('organizations', $id) LIMIT 1`,
         { id: organizationId },
       );
       const rows = result[0] ?? [];
@@ -65,21 +65,19 @@ export const createOrganizationsRepo = (client: SurrealClient) => ({
   insertWithOwnerMembership: (
     organization: Organization,
     ownerMembership: OrganizationMembership | null,
-  ) =>
-    client.useTx("rows.organizations.insert_with_owner_membership", async (db) => {
-      await db.query(
-        `INSERT INTO organizations $content`,
-        { content: organization },
-      );
-
-      if (ownerMembership !== null) {
-        const decoded = decodeOrganizationMembership(ownerMembership);
-        await db.query(
-          `INSERT INTO organization_memberships $content ON DUPLICATE KEY UPDATE id = $content.id, organizationId = $content.organizationId, accountId = $content.accountId, role = $content.role, updatedAt = $content.updatedAt`,
-          { content: decoded },
-        );
-      }
-    }),
+  ) => {
+    const statements: Array<{ sql: string; vars?: Record<string, unknown> }> = [
+      { sql: `INSERT INTO organizations $content`, vars: { content: organization } },
+    ];
+    if (ownerMembership !== null) {
+      const decoded = decodeOrganizationMembership(ownerMembership);
+      statements.push({
+        sql: `INSERT INTO organization_memberships $content ON DUPLICATE KEY UPDATE id = $content.id, organizationId = $content.organizationId, accountId = $content.accountId, role = $content.role, updatedAt = $content.updatedAt`,
+        vars: { content: decoded },
+      });
+    }
+    return client.useTx("rows.organizations.insert_with_owner_membership", statements);
+  },
 
   update: (
     organizationId: Organization["id"],
@@ -87,7 +85,7 @@ export const createOrganizationsRepo = (client: SurrealClient) => ({
   ) =>
     client.use("rows.organizations.update", async (db) => {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `UPDATE type::thing('organizations', $id) MERGE $patch RETURN *, meta::id(id) AS id`,
+        `UPDATE type::record('organizations', $id) MERGE $patch RETURN *, meta::id(id) AS id`,
         { id: organizationId, patch },
       );
       const rows = result[0] ?? [];
@@ -100,7 +98,7 @@ export const createOrganizationsRepo = (client: SurrealClient) => ({
   removeById: (organizationId: Organization["id"]) =>
     client.use("rows.organizations.remove", async (db) => {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `DELETE type::thing('organizations', $id) RETURN BEFORE *`,
+        `DELETE type::record('organizations', $id) RETURN BEFORE`,
         { id: organizationId },
       );
       const rows = result[0] ?? [];
@@ -108,7 +106,7 @@ export const createOrganizationsRepo = (client: SurrealClient) => ({
     }),
 
   removeTreeById: (organizationId: Organization["id"]) =>
-    client.useTx("rows.organizations.remove_tree", async (db) => {
+    client.use("rows.organizations.remove_tree", async (db) => {
       // Get workspace IDs
       const wsResult = await db.query<[Array<{ id: unknown }>]>(
         `SELECT meta::id(id) AS id FROM workspaces WHERE organizationId = $orgId`,
@@ -147,66 +145,25 @@ export const createOrganizationsRepo = (client: SurrealClient) => ({
           );
         }
 
-        await db.query(
-          `DELETE executions WHERE workspaceId IN $workspaceIds`,
-          { workspaceIds },
-        );
-
-        await db.query(
-          `DELETE source_auth_sessions WHERE workspaceId IN $workspaceIds`,
-          { workspaceIds },
-        );
-
-        await db.query(
-          `DELETE source_credential_bindings WHERE workspaceId IN $workspaceIds`,
-          { workspaceIds },
-        );
-
-        await db.query(
-          `DELETE credentials WHERE workspaceId IN $workspaceIds`,
-          { workspaceIds },
-        );
-
-        await db.query(
-          `DELETE sources WHERE workspaceId IN $workspaceIds`,
-          { workspaceIds },
-        );
-
-        await db.query(
-          `DELETE policies WHERE workspaceId IN $workspaceIds`,
-          { workspaceIds },
-        );
-
-        await db.query(
-          `DELETE workspaces WHERE id IN $workspaceIds`,
-          { workspaceIds },
-        );
+        await db.query(`DELETE executions WHERE workspaceId IN $workspaceIds`, { workspaceIds });
+        await db.query(`DELETE source_auth_sessions WHERE workspaceId IN $workspaceIds`, { workspaceIds });
+        await db.query(`DELETE source_credential_bindings WHERE workspaceId IN $workspaceIds`, { workspaceIds });
+        await db.query(`DELETE credentials WHERE workspaceId IN $workspaceIds`, { workspaceIds });
+        await db.query(`DELETE sources WHERE workspaceId IN $workspaceIds`, { workspaceIds });
+        await db.query(`DELETE policies WHERE workspaceId IN $workspaceIds`, { workspaceIds });
+        await db.query(`DELETE workspaces WHERE id IN $workspaceIds`, { workspaceIds });
 
         if (postgresSecretHandles.length > 0) {
-          await db.query(
-            `DELETE secret_materials WHERE id IN $secretIds`,
-            { secretIds: postgresSecretHandles },
-          );
+          await db.query(`DELETE secret_materials WHERE id IN $secretIds`, { secretIds: postgresSecretHandles });
         }
       }
 
-      await db.query(
-        `DELETE local_installations WHERE organizationId = $orgId`,
-        { orgId: organizationId },
-      );
-
-      await db.query(
-        `DELETE organization_memberships WHERE organizationId = $orgId`,
-        { orgId: organizationId },
-      );
-
-      await db.query(
-        `DELETE policies WHERE organizationId = $orgId`,
-        { orgId: organizationId },
-      );
+      await db.query(`DELETE local_installations WHERE organizationId = $orgId`, { orgId: organizationId });
+      await db.query(`DELETE organization_memberships WHERE organizationId = $orgId`, { orgId: organizationId });
+      await db.query(`DELETE policies WHERE organizationId = $orgId`, { orgId: organizationId });
 
       const deleted = await db.query<[Array<Record<string, unknown>>]>(
-        `DELETE type::thing('organizations', $id) RETURN BEFORE *`,
+        `DELETE type::record('organizations', $id) RETURN BEFORE`,
         { id: organizationId },
       );
       const rows = deleted[0] ?? [];

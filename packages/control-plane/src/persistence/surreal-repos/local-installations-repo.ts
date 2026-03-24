@@ -14,7 +14,7 @@ export const createLocalInstallationsRepo = (client: SurrealClient) => ({
   getById: (installationId: LocalInstallation["id"]) =>
     client.use("rows.local_installations.get_by_id", async (db) => {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `SELECT *, meta::id(id) AS id FROM local_installations WHERE id = type::thing('local_installations', $id) LIMIT 1`,
+        `SELECT *, meta::id(id) AS id FROM local_installations WHERE id = type::record('local_installations', $id) LIMIT 1`,
         { id: installationId },
       );
       const rows = result[0] ?? [];

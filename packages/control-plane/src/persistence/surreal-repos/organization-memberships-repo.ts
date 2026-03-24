@@ -61,7 +61,7 @@ export const createOrganizationMembershipsRepo = (client: SurrealClient) => ({
   ) =>
     client.use("rows.organization_memberships.remove", async (db) => {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `DELETE organization_memberships WHERE organizationId = $organizationId AND accountId = $accountId RETURN BEFORE *`,
+        `DELETE organization_memberships WHERE organizationId = $organizationId AND accountId = $accountId RETURN BEFORE`,
         { organizationId, accountId },
       );
       const rows = result[0] ?? [];

@@ -29,7 +29,7 @@ export const createSourceAuthSessionsRepo = (client: SurrealClient) => ({
   getById: (id: SourceAuthSession["id"]) =>
     client.use("rows.source_auth_sessions.get_by_id", async (db) => {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `SELECT *, meta::id(id) AS id FROM source_auth_sessions WHERE id = type::thing('source_auth_sessions', $id) LIMIT 1`,
+        `SELECT *, meta::id(id) AS id FROM source_auth_sessions WHERE id = type::record('source_auth_sessions', $id) LIMIT 1`,
         { id },
       );
       const rows = result[0] ?? [];
@@ -82,7 +82,7 @@ export const createSourceAuthSessionsRepo = (client: SurrealClient) => ({
   ) =>
     client.use("rows.source_auth_sessions.update", async (db) => {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `UPDATE type::thing('source_auth_sessions', $id) MERGE $patch RETURN *, meta::id(id) AS id`,
+        `UPDATE type::record('source_auth_sessions', $id) MERGE $patch RETURN *, meta::id(id) AS id`,
         { id, patch },
       );
       const rows = result[0] ?? [];
@@ -106,7 +106,7 @@ export const createSourceAuthSessionsRepo = (client: SurrealClient) => ({
   ) =>
     client.use("rows.source_auth_sessions.remove_by_workspace_and_source_id", async (db) => {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `DELETE source_auth_sessions WHERE workspaceId = $workspaceId AND sourceId = $sourceId RETURN BEFORE *`,
+        `DELETE source_auth_sessions WHERE workspaceId = $workspaceId AND sourceId = $sourceId RETURN BEFORE`,
         { workspaceId, sourceId },
       );
       const rows = result[0] ?? [];

@@ -24,7 +24,7 @@ export const createCredentialsRepo = (client: SurrealClient) => ({
   getById: (id: Credential["id"]) =>
     client.use("rows.credentials.get_by_id", async (db) => {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `SELECT *, meta::id(id) AS id FROM credentials WHERE id = type::thing('credentials', $id) LIMIT 1`,
+        `SELECT *, meta::id(id) AS id FROM credentials WHERE id = type::record('credentials', $id) LIMIT 1`,
         { id },
       );
       const rows = result[0] ?? [];
@@ -45,7 +45,7 @@ export const createCredentialsRepo = (client: SurrealClient) => ({
   removeById: (id: Credential["id"]) =>
     client.use("rows.credentials.remove", async (db) => {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `DELETE type::thing('credentials', $id) RETURN BEFORE *`,
+        `DELETE type::record('credentials', $id) RETURN BEFORE`,
         { id },
       );
       const rows = result[0] ?? [];

@@ -81,7 +81,7 @@ export const createSourcesRepo = (client: SurrealClient) => ({
     workspaceId: StoredSourceRecord["workspaceId"],
     sourceId: StoredSourceRecord["id"],
   ) =>
-    client.useTx("rows.sources.remove", async (db) => {
+    client.use("rows.sources.remove", async (db) => {
       // Get existing tool artifact paths
       const pathResult = await db.query<[Array<{ path: string }>]>(
         `SELECT path FROM tool_artifacts WHERE workspaceId = $workspaceId AND sourceId = $sourceId`,
@@ -112,7 +112,7 @@ export const createSourcesRepo = (client: SurrealClient) => ({
       );
 
       const deleted = await db.query<[Array<Record<string, unknown>>]>(
-        `DELETE sources WHERE workspaceId = $workspaceId AND sourceId = $sourceId RETURN BEFORE *`,
+        `DELETE sources WHERE workspaceId = $workspaceId AND sourceId = $sourceId RETURN BEFORE`,
         { workspaceId, sourceId },
       );
       const rows = deleted[0] ?? [];

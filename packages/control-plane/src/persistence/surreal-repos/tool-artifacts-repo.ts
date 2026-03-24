@@ -204,7 +204,7 @@ export const createToolArtifactsRepo = (client: SurrealClient) => ({
     sourceId: StoredToolArtifactRecord["sourceId"];
     artifacts: readonly ReplaceableToolArtifactRecord[];
   }) =>
-    client.useTx("rows.tool_artifacts.replace_for_source", async (db) => {
+    client.use("rows.tool_artifacts.replace_for_source", async (db) => {
       const pathResult = await db.query<[Array<{ path: string }>]>(
         `SELECT path FROM tool_artifacts WHERE workspaceId = $workspaceId AND sourceId = $sourceId`,
         { workspaceId: input.workspaceId, sourceId: input.sourceId },
@@ -273,7 +273,7 @@ export const createToolArtifactsRepo = (client: SurrealClient) => ({
     workspaceId: StoredToolArtifactRecord["workspaceId"],
     sourceId: StoredToolArtifactRecord["sourceId"],
   ) =>
-    client.useTx("rows.tool_artifacts.remove_by_workspace_and_source_id", async (db) => {
+    client.use("rows.tool_artifacts.remove_by_workspace_and_source_id", async (db) => {
       const pathResult = await db.query<[Array<{ path: string }>]>(
         `SELECT path FROM tool_artifacts WHERE workspaceId = $workspaceId AND sourceId = $sourceId`,
         { workspaceId, sourceId },
@@ -296,7 +296,7 @@ export const createToolArtifactsRepo = (client: SurrealClient) => ({
       }
 
       const deleted = await db.query<[Array<Record<string, unknown>>]>(
-        `DELETE tool_artifacts WHERE workspaceId = $workspaceId AND sourceId = $sourceId RETURN BEFORE *`,
+        `DELETE tool_artifacts WHERE workspaceId = $workspaceId AND sourceId = $sourceId RETURN BEFORE`,
         { workspaceId, sourceId },
       );
       const rows = deleted[0] ?? [];

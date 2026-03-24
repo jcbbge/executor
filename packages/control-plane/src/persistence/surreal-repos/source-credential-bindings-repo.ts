@@ -51,7 +51,7 @@ export const createSourceCredentialBindingsRepo = (client: SurrealClient) => ({
   ) =>
     client.use("rows.source_credential_bindings.remove", async (db) => {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `DELETE source_credential_bindings WHERE workspaceId = $workspaceId AND sourceId = $sourceId RETURN BEFORE *`,
+        `DELETE source_credential_bindings WHERE workspaceId = $workspaceId AND sourceId = $sourceId RETURN BEFORE`,
         { workspaceId, sourceId },
       );
       const rows = result[0] ?? [];

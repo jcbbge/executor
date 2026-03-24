@@ -44,7 +44,7 @@ export const createPoliciesRepo = (client: SurrealClient) => ({
   getById: (policyId: Policy["id"]) =>
     client.use("rows.policies.get_by_id", async (db) => {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `SELECT *, meta::id(id) AS id FROM policies WHERE id = type::thing('policies', $id) LIMIT 1`,
+        `SELECT *, meta::id(id) AS id FROM policies WHERE id = type::record('policies', $id) LIMIT 1`,
         { id: policyId },
       );
       const rows = result[0] ?? [];
@@ -68,7 +68,7 @@ export const createPoliciesRepo = (client: SurrealClient) => ({
   ) =>
     client.use("rows.policies.update", async (db) => {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `UPDATE type::thing('policies', $id) MERGE $patch RETURN *, meta::id(id) AS id`,
+        `UPDATE type::record('policies', $id) MERGE $patch RETURN *, meta::id(id) AS id`,
         { id: policyId, patch },
       );
       const rows = result[0] ?? [];
@@ -81,7 +81,7 @@ export const createPoliciesRepo = (client: SurrealClient) => ({
   removeById: (policyId: Policy["id"]) =>
     client.use("rows.policies.remove", async (db) => {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `DELETE type::thing('policies', $id) RETURN BEFORE *`,
+        `DELETE type::record('policies', $id) RETURN BEFORE`,
         { id: policyId },
       );
       const rows = result[0] ?? [];

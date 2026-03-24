@@ -1047,4 +1047,67 @@ export const createExecutorToolMap = (input: {
     },
   }),
 
+  // Unified Bootstrap — returns identity + workspace + capability map in one call
+  "executor.primitives.bootstrap": toTool({
+    tool: {
+      description: "Unified session bootstrap. Returns three layers simultaneously: (1) identity context from anima (memories, continuity), (2) workspace context from dev-brain (recent activity, todos, threads), (3) capability map from executor (all 9 primitive types indexed and ready). Call once at session start. Replaces separate anima_bootstrap + starting-session calls. Each layer degrades gracefully — if one fails, the others still return.",
+      inputSchema: Schema.standardSchemaV1(Schema.Struct({ limit: Schema.optional(Schema.Number) })),
+      outputSchema: Schema.standardSchemaV1(Schema.Unknown),
+      execute: async (args: { limit?: number }) => {
+        const callMcpTool = async (
+          endpoint: string,
+          toolName: string,
+          toolArgs: Record<string, unknown>,
+        ): Promise<unknown> => {
+          const res = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Accept": "application/json, text/event-stream" },
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              method: "tools/call",
+              params: { name: toolName, arguments: toolArgs },
+              id: 1,
+            }),
+          });
+          const json = await res.json() as { result?: { content?: Array<{ type: string; text?: string }> }; error?: unknown };
+          if (json.error) throw new Error(JSON.stringify(json.error));
+          const content = json.result?.content ?? [];
+          const text = content.find((c: { type: string }) => c.type === "text")?.text ?? null;
+          if (text) {
+            try { return JSON.parse(text); } catch { return text; }
+          }
+          return json.result;
+        };
+
+        const [identity, workspace, capabilities] = await Promise.allSettled([
+          callMcpTool("http://127.0.0.1:3098/mcp", "anima_bootstrap", {}),
+          callMcpTool("http://127.0.0.1:3097/mcp", "get_recent_context", { limit: args.limit ?? 5 }),
+          (async () => {
+            const service = createPrimitivesService();
+            return runEffect(service.discover());
+          })(),
+        ]);
+
+        return {
+          identity: identity.status === "fulfilled" ? identity.value : { error: String((identity as PromiseRejectedResult).reason) },
+          workspace: workspace.status === "fulfilled" ? workspace.value : { error: String((workspace as PromiseRejectedResult).reason) },
+          capabilities: capabilities.status === "fulfilled"
+            ? {
+                total: (capabilities.value as { all: unknown[] }).all.length,
+                byType: Object.fromEntries(
+                  Object.entries((capabilities.value as { byType: Record<string, unknown[]> }).byType).map(([k, v]) => [k, (v as unknown[]).length])
+                ),
+              }
+            : { error: String((capabilities as PromiseRejectedResult).reason) },
+        };
+      },
+    },
+    metadata: {
+      inputType: "{ limit?: number }",
+      outputType: "{ identity: unknown; workspace: unknown; capabilities: { total: number; byType: Record<string, number> } }",
+      sourceKey: "executor",
+      interaction: "auto",
+    },
+  }),
+
 });

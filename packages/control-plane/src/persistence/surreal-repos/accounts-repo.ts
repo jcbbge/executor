@@ -11,7 +11,7 @@ export const createAccountsRepo = (client: SurrealClient) => ({
   getById: (accountId: Account["id"]) =>
     client.use("rows.accounts.get_by_id", async (db) => {
       const result = await db.query<[Array<Record<string, unknown>>]>(
-        `SELECT *, meta::id(id) AS id FROM accounts WHERE id = type::thing('accounts', $id) LIMIT 1`,
+        `SELECT *, meta::id(id) AS id FROM accounts WHERE id = type::record('accounts', $id) LIMIT 1`,
         { id: accountId },
       );
       const rows = result[0] ?? [];
