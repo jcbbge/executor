@@ -62,6 +62,15 @@ export * from "./workspace-execution-environment";
 export * from "./source-inspection";
 export * from "./source-discovery";
 export * from "./execution-service";
+export * from "./skills";
+export * from "./rules";
+export * from "./subagents";
+export * from "./commands";
+export * from "./hooks";
+export * from "./integrations";
+export * from "./plugins";
+export * from "./agent-file";
+export * from "./primitives";
 
 export type RuntimeControlPlaneOptions = {
   actorResolver?: ControlPlaneActorResolverShape;
