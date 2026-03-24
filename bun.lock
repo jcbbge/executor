@@ -143,7 +143,7 @@
       "name": "@executor/control-plane",
       "dependencies": {
         "@effect/platform": "catalog:",
-        "@electric-sql/pglite": "^0.3.15",
+        "@electric-sql/pglite": "^0.3.12",
         "@executor/codemode-core": "workspace:*",
         "@executor/codemode-mcp": "workspace:*",
         "@executor/codemode-openapi": "workspace:*",
