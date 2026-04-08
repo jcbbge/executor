@@ -36,6 +36,8 @@ export {
   DEFAULT_EXECUTOR_DATA_DIR,
   DEFAULT_EXECUTOR_HOME,
   DEFAULT_LOCAL_DATA_DIR,
+  DEFAULT_CONTROL_PLANE_BASE_URL,
+  DEFAULT_CONTROL_PLANE_PORT,
   DEFAULT_SERVER_BASE_URL,
   DEFAULT_SERVER_LOG_FILE,
   DEFAULT_SERVER_HOST,
@@ -448,7 +450,7 @@ export const createLocalExecutorServer = (
                 const request = toWebRequest(nodeRequest);
                 const response = isApiRequest(request)
                   ? await requestHandler.handleApiRequest(request)
-                  : await serveUiAsset(request, options.ui ?? {}) ?? new Response("Not Found", { status: 404 });
+                  : new Response("Not Found", { status: 404 });
                 await writeNodeResponse(nodeResponse, response);
               })().catch((cause) => {
                 nodeResponse.statusCode = 500;

@@ -38,6 +38,11 @@ const legacyMacHome = join(
 export const DEFAULT_SERVER_PORT = 8788;
 export const DEFAULT_SERVER_HOST = "127.0.0.1";
 export const DEFAULT_SERVER_BASE_URL = `http://${DEFAULT_SERVER_HOST}:${DEFAULT_SERVER_PORT}`;
+
+// The control-plane HTTP API lives on a separate port from the MCP server.
+// All CLI operations (install, seed, call, status) route through this.
+export const DEFAULT_CONTROL_PLANE_PORT = 8000;
+export const DEFAULT_CONTROL_PLANE_BASE_URL = `http://${DEFAULT_SERVER_HOST}:${DEFAULT_CONTROL_PLANE_PORT}`;
 export const DEFAULT_EXECUTOR_HOME =
   explicitExecutorHome
   ?? (isWindows ? defaultWindowsHome : isMac ? defaultMacHome : defaultLinuxHome);

@@ -29,12 +29,12 @@ import * as Option from "effect/Option";
 import * as Cause from "effect/Cause";
 
 import {
-  DEFAULT_SERVER_BASE_URL,
   DEFAULT_SERVER_HOST,
   DEFAULT_LOCAL_DATA_DIR,
   DEFAULT_SERVER_LOG_FILE,
   DEFAULT_SERVER_PID_FILE,
   DEFAULT_SERVER_PORT,
+  DEFAULT_CONTROL_PLANE_BASE_URL,
   SERVER_POLL_INTERVAL_MS,
   SERVER_START_TIMEOUT_MS,
   runLocalExecutorServer,
@@ -42,6 +42,7 @@ import {
 import {
   seedDemoMcpSourceInWorkspace,
   seedGithubOpenApiSourceInWorkspace,
+  seedMcpSourceInWorkspace,
 } from "./dev";
 import {
   resolveRuntimeMigrationsDir,
@@ -144,7 +145,7 @@ const readCode = (input: {
     );
   });
 
-const getBootstrapClient = (baseUrl: string = DEFAULT_SERVER_BASE_URL) =>
+const getBootstrapClient = (baseUrl: string = DEFAULT_CONTROL_PLANE_BASE_URL) =>
   createControlPlaneClient({ baseUrl });
 
 const decodeExecutionId = Schema.decodeUnknown(ExecutionIdSchema);
@@ -391,7 +392,7 @@ const helpOverride = (): Effect.Effect<void, Error, never> | null => {
   return null;
 };
 
-const getLocalAuthedClient = (baseUrl: string = DEFAULT_SERVER_BASE_URL) =>
+const getLocalAuthedClient = (baseUrl: string = DEFAULT_CONTROL_PLANE_BASE_URL) =>
   Effect.gen(function* () {
     const bootstrapClient = yield* getBootstrapClient(baseUrl);
     const installation = yield* bootstrapClient.local.installation({});
@@ -688,7 +689,7 @@ const stopServer = (baseUrl: string) =>
     return true;
   });
 
-const ensureServer = (baseUrl: string = DEFAULT_SERVER_BASE_URL) =>
+const ensureServer = (baseUrl: string = DEFAULT_CONTROL_PLANE_BASE_URL) =>
   Effect.gen(function* () {
     const reachable = yield* isServerReachable(baseUrl);
     if (reachable) {
@@ -1130,7 +1131,7 @@ const serverCommand = Command.make("server").pipe(
 const upCommand = Command.make(
   "up",
   {
-    baseUrl: Options.text("base-url").pipe(Options.withDefault(DEFAULT_SERVER_BASE_URL)),
+    baseUrl: Options.text("base-url").pipe(Options.withDefault(DEFAULT_CONTROL_PLANE_BASE_URL)),
   },
   ({ baseUrl }) =>
     ensureServer(baseUrl).pipe(
@@ -1142,7 +1143,7 @@ const upCommand = Command.make(
 const downCommand = Command.make(
   "down",
   {
-    baseUrl: Options.text("base-url").pipe(Options.withDefault(DEFAULT_SERVER_BASE_URL)),
+    baseUrl: Options.text("base-url").pipe(Options.withDefault(DEFAULT_CONTROL_PLANE_BASE_URL)),
   },
   ({ baseUrl }) =>
     stopServer(baseUrl).pipe(
@@ -1155,7 +1156,7 @@ const downCommand = Command.make(
 const statusCommand = Command.make(
   "status",
   {
-    baseUrl: Options.text("base-url").pipe(Options.withDefault(DEFAULT_SERVER_BASE_URL)),
+    baseUrl: Options.text("base-url").pipe(Options.withDefault(DEFAULT_CONTROL_PLANE_BASE_URL)),
     json: Options.boolean("json").pipe(Options.withDefault(false)),
   },
   ({ baseUrl, json }) =>
@@ -1167,7 +1168,7 @@ const statusCommand = Command.make(
 const doctorCommand = Command.make(
   "doctor",
   {
-    baseUrl: Options.text("base-url").pipe(Options.withDefault(DEFAULT_SERVER_BASE_URL)),
+    baseUrl: Options.text("base-url").pipe(Options.withDefault(DEFAULT_CONTROL_PLANE_BASE_URL)),
     json: Options.boolean("json").pipe(Options.withDefault(false)),
   },
   ({ baseUrl, json }) =>
@@ -1254,7 +1255,7 @@ const callCommand = Command.make(
     ),
     file: Options.text("file").pipe(Options.optional),
     stdin: Options.boolean("stdin").pipe(Options.withDefault(false)),
-    baseUrl: Options.text("base-url").pipe(Options.withDefault(DEFAULT_SERVER_BASE_URL)),
+    baseUrl: Options.text("base-url").pipe(Options.withDefault(DEFAULT_CONTROL_PLANE_BASE_URL)),
     noOpen: Options.boolean("no-open").pipe(Options.withDefault(false)),
   },
   ({ code, file, stdin, baseUrl, noOpen }) =>
@@ -1292,7 +1293,7 @@ const resumeCommand = Command.make(
   "resume",
   {
     executionId: Options.text("execution-id"),
-    baseUrl: Options.text("base-url").pipe(Options.withDefault(DEFAULT_SERVER_BASE_URL)),
+    baseUrl: Options.text("base-url").pipe(Options.withDefault(DEFAULT_CONTROL_PLANE_BASE_URL)),
     noOpen: Options.boolean("no-open").pipe(Options.withDefault(false)),
   },
   ({ executionId, baseUrl, noOpen }) =>
@@ -1321,10 +1322,55 @@ const resumeCommand = Command.make(
     }),
 ).pipe(Command.withDescription("Resume a paused execution"));
 
+const BRAIN_LAYER_SOURCES = [
+  { name: "anima",        namespace: "anima",    endpoint: "http://127.0.0.1:3098/mcp", transport: "streamable-http" as const },
+  { name: "dev-brain",    namespace: "devbrain", endpoint: "http://127.0.0.1:3097/mcp", transport: "streamable-http" as const },
+  { name: "kotadb",       namespace: "kotadb",   endpoint: "http://127.0.0.1:3099/",    transport: "streamable-http" as const },
+  { name: "subagent-mcp", namespace: "subagent", endpoint: "http://127.0.0.1:3096/",    transport: "streamable-http" as const },
+] as const;
+
+const seedBrainLayers = (baseUrl: string) =>
+  Effect.gen(function* () {
+    // Do NOT call ensureServer — the server is already running when this is invoked post-boot.
+    const { installation, client } = yield* getLocalAuthedClient(baseUrl);
+    const results: Array<{ name: string; action: string; sourceId: string }> = [];
+
+    for (const source of BRAIN_LAYER_SOURCES) {
+      const result = yield* seedMcpSourceInWorkspace({
+        client,
+        workspaceId: installation.workspaceId,
+        ...source,
+      }).pipe(
+        Effect.catchAll((err) =>
+          Effect.succeed({ action: `error: ${String(err)}`, sourceId: "none", workspaceId: installation.workspaceId, endpoint: source.endpoint }),
+        ),
+      );
+      results.push({ name: source.name, action: result.action, sourceId: result.sourceId });
+    }
+
+    yield* Effect.sync(() => {
+      for (const r of results) {
+        console.log(`${r.action === "noop" ? "✓" : "+"} ${r.name} (${r.action}) — ${r.sourceId}`);
+      }
+    });
+  });
+
+const seedBrainLayersCommand = Command.make(
+  "seed-brain-layers",
+  {
+    baseUrl: Options.text("base-url").pipe(Options.withDefault(DEFAULT_CONTROL_PLANE_BASE_URL)),
+  },
+  ({ baseUrl }) => seedBrainLayers(baseUrl),
+).pipe(
+  Command.withDescription(
+    "Register brain-layer MCP sources (anima, dev-brain, kotadb, subagent-mcp) into the default workspace. Idempotent — safe to run on every boot.",
+  ),
+);
+
 const devSeedMcpDemoCommand = Command.make(
   "seed-mcp-demo",
   {
-    baseUrl: Options.text("base-url").pipe(Options.withDefault(DEFAULT_SERVER_BASE_URL)),
+    baseUrl: Options.text("base-url").pipe(Options.withDefault(DEFAULT_CONTROL_PLANE_BASE_URL)),
     endpoint: Options.text("endpoint").pipe(
       Options.withDefault("http://127.0.0.1:58506/mcp"),
     ),
@@ -1347,7 +1393,7 @@ const devSeedMcpDemoCommand = Command.make(
 const devSeedGithubCommand = Command.make(
   "seed-github",
   {
-    baseUrl: Options.text("base-url").pipe(Options.withDefault(DEFAULT_SERVER_BASE_URL)),
+    baseUrl: Options.text("base-url").pipe(Options.withDefault(DEFAULT_CONTROL_PLANE_BASE_URL)),
     endpoint: Options.text("endpoint").pipe(
       Options.withDefault("https://api.github.com"),
     ),
@@ -1378,7 +1424,7 @@ const devSeedGithubCommand = Command.make(
 );
 
 const devCommand = Command.make("dev").pipe(
-  Command.withSubcommands([devSeedMcpDemoCommand, devSeedGithubCommand] as const),
+  Command.withSubcommands([devSeedMcpDemoCommand, devSeedGithubCommand, seedBrainLayersCommand] as const),
   Command.withDescription("Development helpers"),
 );
 
@@ -1392,6 +1438,7 @@ const root = Command.make("executor").pipe(
     sandboxCommand,
     callCommand,
     resumeCommand,
+    seedBrainLayersCommand,
     devCommand,
   ] as const),
   Command.withDescription("Executor local CLI"),
